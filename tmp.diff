@@ -1,0 +1,66 @@
+diff --git a/gcc/cp/ChangeLog b/gcc/cp/ChangeLog
+index 99836fb..089d388 100644
+--- a/gcc/cp/ChangeLog
++++ b/gcc/cp/ChangeLog
+@@ -1,5 +1,7 @@
+ 2017-03-16  Jason Merrill  <jason@redhat.com>
+ 
++	* decl.c (start_enum): std::byte aliases anything.
++
+ 	PR c++/79797
+ 	* constexpr.c (lookup_placeholder): Tweak.
+ 
+diff --git a/gcc/cp/decl.c b/gcc/cp/decl.c
+index 0ecd30b..61ecf81 100644
+--- a/gcc/cp/decl.c
++++ b/gcc/cp/decl.c
+@@ -14079,6 +14079,12 @@ start_enum (tree name, tree enumtype, tree underlying_type,
+ 	{
+ 	  enumtype = cxx_make_type (ENUMERAL_TYPE);
+ 	  enumtype = pushtag (name, enumtype, /*tag_scope=*/ts_current);
++
++	  /* std::byte aliases anything.  */
++	  if (enumtype != error_mark_node
++	      && TYPE_CONTEXT (enumtype) == std_node
++	      && !strcmp ("byte", TYPE_NAME_STRING (enumtype)))
++	    TYPE_ALIAS_SET (enumtype) = 0;
+ 	}
+       else
+ 	  enumtype = xref_tag (enum_type, name, /*tag_scope=*/ts_current,
+diff --git a/gcc/testsuite/g++.dg/cpp1z/byte1.C b/gcc/testsuite/g++.dg/cpp1z/byte1.C
+new file mode 100644
+index 0000000..51c1a33
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp1z/byte1.C
+@@ -0,0 +1,31 @@
++// Test for std::byte aliasing properties.
++// { dg-options "-std=c++1z -O3" }
++
++#include <cstddef>
++
++using byte = std::byte;
++
++enum class notbyte: unsigned char {} *np;
++
++int main()
++{
++  int x;
++
++  /* Stores through byte* can alias int, so the compiler can't optimize
++     "x != 0".  */
++  byte *p = (byte*)&x;
++  x = 42;
++  for (int i = 0; i < 4; ++i)
++    p[i] = byte(0);
++  if (x != 0)
++    __builtin_abort();
++
++  /* Stores through notbyte* mustn't alias int, so at -O3 the compiler should
++     optimize "x != 42" to false.  */
++  notbyte *np = (notbyte*)&x; 
++  x = 42;
++  for (int i = 0; i < 4; ++i)
++    np[i] = notbyte(0);
++  if (x != 42)
++    __builtin_abort();
++}
