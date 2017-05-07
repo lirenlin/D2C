@@ -10,5 +10,6 @@ public:
 
 int main (int a)
 {
+MyClass b;
 return a;
 }
