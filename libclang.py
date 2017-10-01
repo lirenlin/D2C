@@ -2,17 +2,42 @@
 
 import sys
 import clang.cindex
+import collections
 
-def find_typerefs(node, typename, loc):
-    if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
-      print node.displayname
-      print node.extent
-      if node.extent.start.line <= loc and node.extent.end.line >= loc:
-        print "in this function"
-    else:
+Loc = collections.namedtuple('Loc','start end')
+
+def find_context (node, loc):
+  if not node.displayname:
+    return None;
+
+  # clang.cindex.CursorKind.TRANSLATION_UNIT:
+  print node.displayname, node.extent.start.line, \
+      node.extent.end.line
+
+  if node.extent.start.line <= loc.start \
+      and node.extent.end.line >= loc.end:
       for c in node.get_children():
-          find_typerefs(c, typename, loc)
+        res = find_context (c, loc)
+        if res:
+          return res;
+      return node
+  else:
+    return None;
+
+def list_context (node, loc):
+  # clang.cindex.CursorKind.TRANSLATION_UNIT:
+  print node.displayname, node.extent.start.line, \
+      node.extent.end.line
+
+  for c in node.get_children():
+    find_context (c, loc)
 
 index = clang.cindex.Index.create()
 tu = index.parse(sys.argv[1])
-find_typerefs(tu.cursor, sys.argv[2], 13)
+loc = Loc (int (sys.argv[2]), int (sys.argv[3]))
+#node = find_context (tu.cursor, loc)
+#print node.displayname
+list_context (tu.cursor, loc)
+#extent = clang.cindex.SourceRange (loc.start, loc.end)
+#node = tu.get_tokens (extent)
+#print node.displayname

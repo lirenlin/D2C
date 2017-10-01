@@ -1,66 +1,63 @@
+commit 56da7fe60998b5072a48e832cc28e85a0bc245ae
+Author: jason <jason@138bc75d-0d04-0410-961f-82ee72b054a4>
+Date:   Sun Sep 10 09:11:40 2017 +0000
+
+    	A partially initialized variable isn't constant.
+    
+    	* constexpr.c (reduced_constant_expression_p): If
+    	CONSTRUCTOR_NO_IMPLICIT_ZERO, check that all fields are initialized.
+    
+    git-svn-id: svn+ssh://gcc.gnu.org/svn/gcc/trunk@251948 138bc75d-0d04-0410-961f-82ee72b054a4
+
 diff --git a/gcc/cp/ChangeLog b/gcc/cp/ChangeLog
-index 99836fb..089d388 100644
+index fa3e008..8395862 100644
 --- a/gcc/cp/ChangeLog
 +++ b/gcc/cp/ChangeLog
-@@ -1,5 +1,7 @@
- 2017-03-16  Jason Merrill  <jason@redhat.com>
- 
-+	* decl.c (start_enum): std::byte aliases anything.
+@@ -1,3 +1,8 @@
++2017-09-09  Jason Merrill  <jason@redhat.com>
 +
- 	PR c++/79797
- 	* constexpr.c (lookup_placeholder): Tweak.
++	* constexpr.c (reduced_constant_expression_p): If
++	CONSTRUCTOR_NO_IMPLICIT_ZERO, check that all fields are initialized.
++
+ 2017-09-09  Eric Botcazou  <ebotcazou@adacore.com>
  
-diff --git a/gcc/cp/decl.c b/gcc/cp/decl.c
-index 0ecd30b..61ecf81 100644
---- a/gcc/cp/decl.c
-+++ b/gcc/cp/decl.c
-@@ -14079,6 +14079,12 @@ start_enum (tree name, tree enumtype, tree underlying_type,
+ 	PR bootstrap/81926
+diff --git a/gcc/cp/constexpr.c b/gcc/cp/constexpr.c
+index a5692fb..2d2f3b8 100644
+--- a/gcc/cp/constexpr.c
++++ b/gcc/cp/constexpr.c
+@@ -1732,15 +1732,30 @@ reduced_constant_expression_p (tree t)
+ 
+     case CONSTRUCTOR:
+       /* And we need to handle PTRMEM_CST wrapped in a CONSTRUCTOR.  */
+-      tree elt; unsigned HOST_WIDE_INT idx;
+-      FOR_EACH_CONSTRUCTOR_VALUE (CONSTRUCTOR_ELTS (t), idx, elt)
++      tree idx, val, field; unsigned HOST_WIDE_INT i;
++      if (CONSTRUCTOR_NO_IMPLICIT_ZERO (t))
++	field = next_initializable_field (TYPE_FIELDS (TREE_TYPE (t)));
++      else
++	field = NULL_TREE;
++      FOR_EACH_CONSTRUCTOR_ELT (CONSTRUCTOR_ELTS (t), i, idx, val)
  	{
- 	  enumtype = cxx_make_type (ENUMERAL_TYPE);
- 	  enumtype = pushtag (name, enumtype, /*tag_scope=*/ts_current);
-+
-+	  /* std::byte aliases anything.  */
-+	  if (enumtype != error_mark_node
-+	      && TYPE_CONTEXT (enumtype) == std_node
-+	      && !strcmp ("byte", TYPE_NAME_STRING (enumtype)))
-+	    TYPE_ALIAS_SET (enumtype) = 0;
+-	  if (!elt)
++	  if (!val)
+ 	    /* We're in the middle of initializing this element.  */
+ 	    return false;
+-	  if (!reduced_constant_expression_p (elt))
++	  if (!reduced_constant_expression_p (val))
+ 	    return false;
++	  if (field)
++	    {
++	      if (idx != field)
++		return false;
++	      field = next_initializable_field (DECL_CHAIN (field));
++	    }
  	}
-       else
- 	  enumtype = xref_tag (enum_type, name, /*tag_scope=*/ts_current,
-diff --git a/gcc/testsuite/g++.dg/cpp1z/byte1.C b/gcc/testsuite/g++.dg/cpp1z/byte1.C
-new file mode 100644
-index 0000000..51c1a33
---- /dev/null
-+++ b/gcc/testsuite/g++.dg/cpp1z/byte1.C
-@@ -0,0 +1,31 @@
-+// Test for std::byte aliasing properties.
-+// { dg-options "-std=c++1z -O3" }
-+
-+#include <cstddef>
-+
-+using byte = std::byte;
-+
-+enum class notbyte: unsigned char {} *np;
-+
-+int main()
-+{
-+  int x;
-+
-+  /* Stores through byte* can alias int, so the compiler can't optimize
-+     "x != 0".  */
-+  byte *p = (byte*)&x;
-+  x = 42;
-+  for (int i = 0; i < 4; ++i)
-+    p[i] = byte(0);
-+  if (x != 0)
-+    __builtin_abort();
-+
-+  /* Stores through notbyte* mustn't alias int, so at -O3 the compiler should
-+     optimize "x != 42" to false.  */
-+  notbyte *np = (notbyte*)&x; 
-+  x = 42;
-+  for (int i = 0; i < 4; ++i)
-+    np[i] = notbyte(0);
-+  if (x != 42)
-+    __builtin_abort();
-+}
++      if (field)
++	return false;
++      else if (CONSTRUCTOR_NO_IMPLICIT_ZERO (t))
++	/* All the fields are initialized.  */
++	CONSTRUCTOR_NO_IMPLICIT_ZERO (t) = false;
+       return true;
+ 
+     default:
